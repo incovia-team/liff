@@ -118,6 +118,7 @@ table.t tr.total td{font-weight:700;border-bottom:0}
 .check{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:14px;font-weight:600;cursor:pointer}
 .check input{width:22px;height:22px;flex:0 0 22px;margin:1px 0 0;accent-color:var(--green)}
 .switch input:checked+span{background:var(--green)} .switch input:checked+span:before{transform:translateX(20px)}
+.wage-card input{min-width:0;max-width:100%}.wage-times{display:flex;align-items:center;flex-wrap:wrap;gap:4px}.wage-times input{width:100px;flex:1;min-width:0;border:0;background:var(--bg);border-radius:8px;padding:8px 10px}.wage-card .chips{flex-wrap:wrap;justify-content:flex-start;gap:4px}.wage-card .chip{padding:4px 8px}.stat .k{overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -431,8 +432,7 @@ function monthView(st) {
   const detail = m.items.map(i => {
     const b = i.breakdown;
     const bd = i.shifts.some(s => s.kind === '時間')
-      ? '<div class="grid2" style="margin-top:6px"><div class="stat"><div class="k">基本</div><div class="v">' + yen(b.base) + '</div></div>' +
-        '<div class="stat"><div class="k">ランチ</div><div class="v">' + yen(b.lunch) + '</div></div>' +
+      ? '<div class="grid2" style="margin-top:6px">' + b.wages.map(w => '<div class="stat"><div class="k">' + esc(w.name) + '</div><div class="v">' + yen(w.yen) + '</div></div>').join('') +
         '<div class="stat"><div class="k">深夜割増</div><div class="v">' + yen(b.night) + '</div></div>' +
         '<div class="stat"><div class="k">8時間超え割増</div><div class="v">' + yen(b.overtime) + '</div></div></div>' +
         '<p class="tiny muted" style="margin:6px 0 0">内訳は目安です（1日ごとの端数処理で、合計と数円ずれることがあります）</p>' : '';
@@ -539,7 +539,7 @@ async function renderInput() {
   const f = s ? {
     kind: s.kind, workplaceId: s.workplaceId, date: s.date,
     start: s.start ? s.start.slice(11) : '', end: s.end ? s.end.slice(11) : '',
-    breakMin: s.breaks ? String(breakMinOf(s.breaks)) : '', dailyWage: s.dailyWage || '', transport: s.transport || '', memo: s.memo || '', payDate: '',
+    breakMin: s.breaks ? String(breakMinOf(s.breaks)) : (s.shiftId ? '0' : ''), dailyWage: s.dailyWage || '', transport: s.transport || '', memo: s.memo || '', payDate: '',
   } : { kind: '時間', workplaceId: (wps[0] || {}).workplaceId || '', date: today, start: '', end: '', breakMin: '', dailyWage: '', transport: '', memo: '', payDate: '' };
 
   if (!wps.length && f.kind === '時間') {
@@ -562,7 +562,8 @@ async function renderInput() {
     '<div class="field"><label>終了<span class="hint" id="f-next"></span></label><input type="time" id="f-end" value="' + esc(f.end) + '"></div>' +
     '<div class="field"><label>休憩（分）<span class="hint" id="f-bhint"></span></label><div style="width:60%;max-width:220px">' +
     '<input type="number" inputmode="numeric" id="f-break" value="' + esc(f.breakMin) + '" placeholder="初期値" style="width:100%">' +
-    '<div class="chips" style="margin-top:6px">' + [0, 30, 60, 90].map(n => '<button class="chip" data-b="' + n + '">' + n + '</button>').join('') + '</div></div></div>' +
+    '<div class="chips" style="margin-top:6px">' + [0, 30, 45, 60, 90].map(n => '<button class="chip" data-b="' + n + '">' + n + '</button>').join('') + '</div></div></div>' +
+    '<div id="f-bwarn" class="tiny" style="color:#7A5600"></div>' +
     (f.kind === '単発'
       ? '<div class="field"><label>日給</label><input type="number" inputmode="numeric" id="f-wage" value="' + esc(f.dailyWage) + '" placeholder="9000"></div>' +
         '<div class="field"><label>交通費</label><input type="number" inputmode="numeric" id="f-trans" value="' + esc(f.transport) + '" placeholder="0"></div>' +
@@ -595,14 +596,15 @@ async function renderInput() {
     $('#f-next').textContent = v.start && v.end && v.end <= v.start ? '翌日' : '';
     clearTimeout(timer);
     const ready = v.kind === '単発' ? Number(v.dailyWage) > 0 : (v.workplaceId && v.date && v.start && v.end);
-    if (!ready) { $('#f-prev').innerHTML = '<span class="muted small">' + (v.kind === '単発' ? '日給を入れると集計に入る金額を表示します' : '時刻を入れると給料を計算します') + '</span>'; return; }
+    if (!ready) { $('#f-bhint').textContent = ''; $('#f-bwarn').textContent = ''; $('#f-prev').innerHTML = '<span class="muted small">' + (v.kind === '単発' ? '日給を入れると集計に入る金額を表示します' : '時刻を入れると給料を計算します') + '</span>'; return; }
     timer = setTimeout(async () => {
       try {
         const p = await api('preview', v);
-        $('#f-bhint').textContent = v.kind === '時間' ? '空欄なら' + p.defaultBreakMin + '分（' + (p.dayOff ? '土日祝' : '平日') + '）' : '';
+        $('#f-bhint').textContent = '空欄なら' + p.defaultBreakMin + '分（' + (p.defaultBreakMin ? '法律で決まった最低の休憩' : '6時間までの勤務') + '）';
+        $('#f-bwarn').textContent = p.breakShort ? '法律で決まった最低の休憩（' + p.breakRequiredMin + '分）より短くなっています。このまま保存できます。' : '';
         $('#f-prev').innerHTML = '<div class="small muted">給料（見込み）</div><div class="big">' + yen(p.pay) + '</div>' +
           '<div class="small">' + (p.workMin ? '勤務 ' + hm(p.workMin) : '') + (p.nightMin ? '・深夜 ' + hm(p.nightMin) : '') +
-          (p.lunchMin ? '・ランチ ' + hm(p.lunchMin) : '') + (p.overtimeMin ? '・8時間超え ' + hm(p.overtimeMin) : '') +
+          (p.wageParts && p.wageParts.length > 1 ? p.wageParts.map(w => '・' + esc(w.name) + ' ' + hm(w.min)).join('') : '') + (p.overtimeMin ? '・8時間超え ' + hm(p.overtimeMin) : '') +
           '<br>支給予定日 ' + md(p.payDate) + (v.kind === '時間' ? '・休憩 ' + p.breakMin + '分' : '') + '</div>';
         $('#f-err').textContent = '';
       } catch (e) { $('#f-prev').innerHTML = '<span class="small" style="color:var(--red)">' + esc(e.message) + '</span>'; }
@@ -774,9 +776,9 @@ function renderSettings() {
       S.init.workplaces = r.workplaces; invalidate(); toast('追加しました'); renderSettings();
     } catch (e) { $('#s-code-err2').textContent = e.message; btn.disabled = false; }
   };
-  document.querySelectorAll('[data-wp]').forEach(el => el.onclick = () => { S.editWp = wps.find(w => w.workplaceId === el.dataset.wp); go('workplace'); });
+  document.querySelectorAll('[data-wp]').forEach(el => el.onclick = () => { S.editWp = JSON.parse(JSON.stringify(wps.find(w => w.workplaceId === el.dataset.wp))); go('workplace'); });
   $('#s-add').onclick = () => {
-    S.editWp = { name: '', baseWage: '', lunchWage: '', lunchEnd: '', weekdayBreakMin: 0, holidayBreakMin: 0, breakStart: '', closingDay: 0, payMonthOffset: 1, payDay: 25, payShift: '前倒し', companyName: '', active: true };
+    S.editWp = { name: '', wages: [{ name: '', wage: '', start: '', end: '', days: [], holiday: false }], overlap: '高い方', closingDay: 0, payMonthOffset: 1, payDay: 25, payShift: '前倒し', companyName: '', active: true };
     go('workplace');
   };
 }
@@ -787,22 +789,46 @@ function closingText(w) {
   return c + '・' + m + w.payDay + '日払い';
 }
 
+function wageSummary(w) {
+  const days = [[1, '月'], [2, '火'], [3, '水'], [4, '木'], [5, '金'], [6, '土'], [0, '日']];
+  const weekdays = [1, 2, 3, 4, 5].every(d => w.days.includes(d)) && !w.days.includes(6) && !w.days.includes(0);
+  const labels = weekdays ? ['月〜金'] : days.filter(([d]) => w.days.includes(d)).map(([, n]) => n);
+  if (w.holiday) labels.push('祝');
+  if (w.start && w.end) labels.push(w.start + '〜' + (w.start > w.end ? '翌' : '') + w.end);
+  return labels.join('・') || 'いつでも';
+}
+
+function wageCard(w, i) {
+  return '<div class="card wage-card"><div class="tiny muted" style="display:flex;justify-content:space-between">' + (i === 0 ? '1つ目（割増のもと）' : (i + 1) + (i === 9 ? '個目' : 'つ目')) +
+    (i ? '<button class="text-link" data-wage-remove="' + i + '" aria-label="この時給を消す">×</button>' : '') + '</div>' +
+    '<div class="field"><label>時給の名前</label><input id="w-' + i + '-name" maxlength="20" value="' + esc(w.name) + '" placeholder="' + (i ? '例）土日' : '例）基本') + '"></div>' +
+    '<div class="field"><label>時給（円）</label><input id="w-' + i + '-wage" type="number" inputmode="numeric" value="' + esc(w.wage) + '"></div>' +
+    (!w.open ? '<div class="tiny muted">' + esc(wageSummary(w)) + '</div>' : '') +
+    '<button class="text-link" data-wage-toggle="' + i + '">' + (w.open ? '− 条件を閉じる' : '＋ 条件を追加') + '</button>' +
+    '<div' + (w.open ? '' : ' hidden') + '><div class="tiny" style="margin-top:12px;color:var(--sub)">時間指定</div><div class="wage-times">' +
+    '<input type="time" id="w-' + i + '-start" value="' + esc(w.start) + '"><span>〜</span><input type="time" id="w-' + i + '-end" value="' + esc(w.end) + '">' +
+    '<button class="text-link tiny" data-wage-clear="' + i + '">時間指定なし</button></div>' +
+    '<p class="tiny muted">22:00〜05:00のように、日をまたぐ時間も指定できます</p><div class="tiny" style="color:var(--sub)">曜日指定</div><div class="chips">' +
+    [[1, '月'], [2, '火'], [3, '水'], [4, '木'], [5, '金'], [6, '土'], [0, '日'], ['holiday', '祝']].map(([d, n]) => '<button class="chip ' + ((d === 'holiday' ? w.holiday : w.days.includes(d)) ? 'on' : '') + '" data-wage-day="' + i + '" data-day="' + d + '">' + n + '</button>').join('') +
+    '</div><p class="tiny muted">日をまたぐ勤務は、出勤した日の曜日で計算します</p></div></div>';
+}
+
 function renderWorkplaceForm() {
   const w = S.editWp;
+  if (!w.wages) w.wages = [{ name: '基本', wage: w.baseWage, start: '', end: '', days: [], holiday: false }];
   const opt = (arr, cur) => arr.map(a => '<option value="' + a[0] + '"' + (String(a[0]) === String(cur) ? ' selected' : '') + '>' + a[1] + '</option>').join('');
   const days = [[0, '末日']].concat(Array.from({ length: 28 }, (_, i) => [i + 1, (i + 1) + '日']));
   const payDays = Array.from({ length: 31 }, (_, i) => [i + 1, (i + 1) + '日']);
   app.innerHTML =
     '<div class="top"><div class="top-row"><button class="icon-btn" onclick="go(\'settings\')">‹</button><div class="top-title">' + (w.workplaceId ? 'バイト先の編集' : 'バイト先の追加') + '</div><div style="width:40px"></div></div></div>' +
     (w.presetId ? '<div class="card notice n-info" style="border:0">プリセットのバイト先です。昇給したときは時給だけ変えてください。</div>' : '') +
-    '<div class="card">' +
-    '<div class="field"><label>名前</label><input type="text" id="w-name" value="' + esc(w.name) + '" style="text-align:left"></div>' +
-    '<div class="field"><label>時給</label><input type="number" inputmode="numeric" id="w-base" value="' + esc(w.baseWage) + '"></div>' +
-    '<div class="field"><label>平日ランチ時給<span class="hint">なければ空欄</span></label><input type="number" inputmode="numeric" id="w-lunch" value="' + esc(w.lunchWage) + '"></div>' +
-    '<div class="field"><label>ランチの終わり<span class="hint">この時刻より前の労働</span></label><input type="time" id="w-lunchend" value="' + esc(w.lunchEnd) + '"></div>' +
-    '<div class="field"><label>休憩の初期値（平日）</label><input type="number" inputmode="numeric" id="w-bw" value="' + esc(w.weekdayBreakMin) + '"></div>' +
-    '<div class="field"><label>休憩の初期値（土日祝）</label><input type="number" inputmode="numeric" id="w-bh" value="' + esc(w.holidayBreakMin) + '"></div>' +
-    '<div class="field"><label>休憩の開始時刻<span class="hint">手入力のとき、ここから休憩</span></label><input type="time" id="w-bs" value="' + esc(w.breakStart) + '"></div>' +
+    (w.wagesError ? '<div class="card notice n-warn" style="border:0">時給の設定が読み取れませんでした。時給を入れ直して保存してください。</div>' : '') +
+    '<div class="card"><div class="field"><label>名前</label><input type="text" id="w-name" value="' + esc(w.name) + '" style="text-align:left"></div></div>' +
+    '<div class="section-title">時給</div>' + w.wages.map((v, i) => wageCard(v, i)).join('') +
+    (w.wages.length < 10 ? '<div style="margin:12px"><button class="btn btn-line" id="w-add" style="border:1px dashed var(--line)">＋ 時給を追加</button></div>' : '<p class="tiny muted" style="margin:4px 16px 0">時給は10個までです</p>') +
+    (w.wages.length > 1 ? '<div class="card"><b>時給が重なったとき</b><div class="seg" id="w-overlap">' + ['高い方', '低い方'].map(v => '<button data-overlap="' + v + '" class="' + ((w.overlap || '高い方') === v ? 'on' : '') + '">' + (v === '高い方' ? '高いほう' : '低いほう') + '</button>').join('') + '</div><p class="tiny muted">同じ時間に、条件つきの時給が2つ以上当てはまるときに使います</p></div>' : '') +
+    '<p class="tiny muted" style="margin:4px 16px 0">条件のない時給は、ほかの時給が当てはまらない時間に使います。どれにも当てはまらない時間は、1つ目の時給で計算します。<br>深夜（22時〜翌5時）と、1回の勤務で8時間を超えた分の割増は、1つ目の時給をもとに自動で計算します。深夜用の時給を作る必要はありません。</p>' +
+    '<div class="section-title">締め日と支払日</div><div class="card">' +
     '<div class="field"><label>締め日</label><select id="w-close">' + opt(days, w.closingDay || 0) + '</select></div>' +
     '<div class="field"><label>支払月</label><select id="w-pm">' + opt([[0, '当月'], [1, '翌月'], [2, '翌々月']], w.payMonthOffset == null ? 1 : w.payMonthOffset) + '</select></div>' +
     '<div class="field"><label>支払日</label><select id="w-pd">' + opt(payDays, w.payDay || 25) + '</select></div>' +
@@ -812,14 +838,32 @@ function renderWorkplaceForm() {
     '<div class="btn-row"><button class="btn btn-primary" id="w-save">保存する</button></div></div>' +
     (w.workplaceId ? '<div class="card"><div class="field"><label>このバイト先をやめた<span class="hint">オンにすると入力の候補に出なくなり、所得税は確定申告の対象として扱います</span></label><label class="switch"><input type="checkbox" id="w-quit"' + (w.active ? '' : ' checked') + '><span></span></label></div></div>' : '');
 
+  const read = () => {
+    w.name = $('#w-name').value;
+    [['closingDay', 'w-close'], ['payMonthOffset', 'w-pm'], ['payDay', 'w-pd'], ['payShift', 'w-ps'], ['companyName', 'w-company']].forEach(([k, id]) => w[k] = $('#' + id).value);
+    w.wages.forEach((v, i) => ['name', 'wage', 'start', 'end'].forEach(k => v[k] = $('#w-' + i + '-' + k).value));
+  };
+  app.querySelectorAll('input,select').forEach(el => el.addEventListener('input', read));
+  const redraw = fn => { read(); fn(); renderWorkplaceForm(); };
+  if ($('#w-add')) $('#w-add').onclick = () => redraw(() => w.wages.push({ name: '', wage: '', start: '', end: '', days: [], holiday: false }));
+  app.querySelectorAll('[data-wage-toggle]').forEach(b => b.onclick = () => redraw(() => { const v = w.wages[Number(b.dataset.wageToggle)]; v.open = !v.open; }));
+  app.querySelectorAll('[data-wage-remove]').forEach(b => b.onclick = () => redraw(() => w.wages.splice(Number(b.dataset.wageRemove), 1)));
+  app.querySelectorAll('[data-wage-clear]').forEach(b => b.onclick = () => redraw(() => { const v = w.wages[Number(b.dataset.wageClear)]; v.start = ''; v.end = ''; }));
+  app.querySelectorAll('[data-wage-day]').forEach(b => b.onclick = () => redraw(() => {
+    const v = w.wages[Number(b.dataset.wageDay)], day = b.dataset.day;
+    if (day === 'holiday') v.holiday = !v.holiday;
+    else { const d = Number(day); v.days = v.days.includes(d) ? v.days.filter(x => x !== d) : v.days.concat(d); }
+  }));
+  app.querySelectorAll('[data-overlap]').forEach(b => b.onclick = () => redraw(() => w.overlap = b.dataset.overlap));
+
   $('#w-save').onclick = async () => {
+    read();
     const btn = $('#w-save'); btn.disabled = true;
     try {
       const r = await api('saveWorkplace', {
-        workplaceId: w.workplaceId || '', name: $('#w-name').value, baseWage: $('#w-base').value, lunchWage: $('#w-lunch').value,
-        lunchEnd: $('#w-lunchend').value, weekdayBreakMin: $('#w-bw').value || 0, holidayBreakMin: $('#w-bh').value || 0,
-        breakStart: $('#w-bs').value, closingDay: $('#w-close').value, payMonthOffset: $('#w-pm').value, payDay: $('#w-pd').value,
-        payShift: $('#w-ps').value, companyName: $('#w-company').value,
+        workplaceId: w.workplaceId || '', name: w.name, wages: w.wages.map(({ name, wage, start, end, days, holiday }) => ({ name, wage, start, end, days, holiday })), overlap: w.overlap,
+        closingDay: w.closingDay, payMonthOffset: w.payMonthOffset, payDay: w.payDay,
+        payShift: w.payShift, companyName: w.companyName,
       });
       S.init.workplaces = r.workplaces; invalidate(); toast('保存しました'); go('settings');
     } catch (e) { $('#w-err').textContent = e.message; btn.disabled = false; }
