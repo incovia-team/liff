@@ -119,6 +119,13 @@ table.t tr.total td{font-weight:700;border-bottom:0}
 .check input{width:22px;height:22px;flex:0 0 22px;margin:1px 0 0;accent-color:var(--green)}
 .switch input:checked+span{background:var(--green)} .switch input:checked+span:before{transform:translateX(20px)}
 .wage-card input{min-width:0;max-width:100%}.wage-times{display:flex;align-items:center;flex-wrap:wrap;gap:4px}.wage-times input{width:100px;flex:1;min-width:0;border:0;background:var(--bg);border-radius:8px;padding:8px 10px}.wage-card .chips{flex-wrap:wrap;justify-content:flex-start;gap:4px}.wage-card .chip{padding:4px 8px}.stat .k{overflow-wrap:anywhere}
+.ring2-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 40px}
+.ring2-center .ring-value{font-size:26px}
+.sub-amt{font-size:12.5px;color:var(--sub);line-height:1.4;margin-top:2px}
+.sub-amt b{color:var(--ink);font-size:14px}
+.under{margin:2px 16px 0;text-align:center;font-size:12.5px;color:var(--sub);line-height:1.7}
+.under b{color:var(--ink)}
+.bdg-out{background:#EEF0F3;color:var(--ink)}
 </style>
 </head>
 <body>
@@ -241,6 +248,7 @@ const wd = d => WEEK[new Date(d + 'T00:00:00').getDay()];
 const pad = n => String(n).padStart(2, '0');
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = 'none', 2200); }
 
+const EXCLUDE_NOTICE = 'お店の届けがないと、役所や税務署がすぐには把握しないことも多いですが、法律上この収入は扶養の判定に入ります。外した分も入れて扶養の基準を超えると、家族（親など）の扶養控除などが減ったりなくなったりして、家族があとから税金を払い直すことや、健康保険の扶養から外れることがあります。外すかどうかはご自身で判断し、くわしくは税務署などに確かめてください。';
 const S = { page: 'status', tab: 'month', year: null, month: null, init: null, status: {}, editShift: null, editPayslip: null, editWp: null };
 const LIFF = window.__MOCK__ ? window.__MOCK__.liff : window.liff;
 
@@ -299,6 +307,32 @@ function ring(ratio, color, inner) {
     '<circle cx="105" cy="105" r="' + r + '" fill="none" stroke="#EEF0F3" stroke-width="16"/>' +
     (p > 0 ? '<circle cx="105" cy="105" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="16" stroke-linecap="round" stroke-dasharray="' + (c * p) + ' ' + c + '" transform="rotate(-90 105 105)"/>' : '') +
     '</svg><div class="ring-center">' + inner + '</div></div></div>';
+}
+
+function ring2(outer, inner, centerHtml) {
+  const arc = o => {
+    const c = 2 * Math.PI * o.r, p = Math.max(0, Math.min(1, o.ratio));
+    return '<circle cx="120" cy="120" r="' + o.r + '" fill="none" stroke="#EEF0F3" stroke-width="' + o.w + '"/>' +
+      (p > 0 ? '<circle cx="120" cy="120" r="' + o.r + '" fill="none" stroke="' + o.color + '" stroke-width="' + o.w + '" stroke-linecap="round" stroke-dasharray="' + (c * p) + ' ' + c + '" transform="rotate(-90 120 120)"/>' : '');
+  };
+  return '<div class="ring-wrap"><div class="ring-box" style="width:240px;height:240px"><svg width="240" height="240" viewBox="0 0 240 240" aria-hidden="true">' + arc(outer) + arc(inner) + '</svg><div class="ring2-center">' + centerHtml + '</div></div></div>';
+}
+
+function excludeField(id, on, hint) {
+  return '<div class="field"><label>扶養の判定から外す<span class="hint">' + esc(hint) + '</span></label><label class="switch"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '><span></span></label></div>' +
+    '<div id="' + id + '-hint" class="tiny" style="color:#23407A"></div>' +
+    '<div class="notice n-info tiny" style="line-height:1.7;margin-top:6px">' + esc(EXCLUDE_NOTICE) + '</div>';
+}
+
+function excludeHint(id, workplaceId, unused) {
+  const w = S.init.workplaces.find(w => w.workplaceId === workplaceId);
+  $('#' + id + '-hint').textContent = w && w.excluded ? 'このバイト先は、設定でまとめて外しています'
+    : unused && $('#' + id).checked ? '明細がある月は、明細のほうで外してください' : '';
+}
+
+function excludedBadge(s) {
+  return (s.excluded || s.excludedByWorkplace || s.excludedByPayslip ? ' <span class="badge bdg-out">外した</span>' : '') +
+    (s.excluded && s.flagUnused ? '<div class="tiny muted">明細がある月は、明細のほうで外してください</div>' : '');
 }
 
 /* ====== 初回の同意 ====== */
@@ -438,14 +472,18 @@ function monthView(st) {
         '<p class="tiny muted" style="margin:6px 0 0">内訳は目安です（1日ごとの端数処理で、合計と数円ずれることがあります）</p>' : '';
     const list = i.shifts.map(s =>
       '<div class="list-row" data-shift="' + esc(s.shiftId) + '"><div class="grow"><b>' + md(s.date) + '（' + wd(s.date) + '）</b> ' +
-      (s.kind === '単発' ? '<span class="badge b-est">単発</span>' : '<span class="muted small">' + esc(s.start.slice(11)) + '〜' + esc(s.end.slice(11)) + '</span>') +
+      (s.kind === '単発' ? '<span class="badge b-est">単発</span>' : '<span class="muted small">' + esc(s.start.slice(11)) + '〜' + esc(s.end.slice(11)) + '</span>') + excludedBadge(Object.assign({ excludedByPayslip: !!(i.payslip && i.payslip.excluded) }, s)) +
       '<div class="tiny muted">' + hm(s.workMin) + (s.nightMin ? '・深夜' + hm(s.nightMin) : '') + (s.source === '打刻写真' ? '・写真' : '・手入力') + (s.memo ? '・' + esc(s.memo) : '') + '</div></div>' +
       '<div class="amt">' + yen(s.pay) + '</div><span class="chev">›</span></div>').join('');
     return '<div style="margin-top:14px"><b>' + esc(i.name) + '</b> <span class="badge ' + (i.status === '確定' ? 'b-ok' : 'b-est') + '">' + i.status + '</span>' + bd + list + '</div>';
   }).join('');
 
-  return ring(1, confirmedAll ? 'var(--green)' : 'var(--green-l)',
-      '<div class="ring-label">' + label + '</div><div class="ring-value">' + yen(m.income) + '</div>') +
+  const center = '<div class="ring-label">' + label + '</div><div class="ring-value">' + yen(m.income) + '</div>';
+  const color = confirmedAll ? 'var(--green)' : 'var(--green-l)';
+  return (m.excluded > 0 ? ring2({ r: 110, w: 16, ratio: 1, color },
+    { r: 88, w: 10, ratio: m.income > 0 ? (m.income - m.excluded) / m.income : 0, color: 'var(--green)' },
+    center + '<div class="sub-amt">外した分を除くと<br><b>' + yen(m.income - m.excluded) + '</b></div>') +
+    '<div class="under">外した分 <b>' + yen(m.excluded) + '</b>（法律上は判定に入る収入です）</div>' : ring(1, color, center)) +
     '<div class="card" style="margin-top:0"><div class="grid2" style="margin-top:0">' +
     '<div class="stat"><div class="k">勤務時間</div><div class="v">' + hm(m.workMin) + '</div></div>' +
     '<div class="stat"><div class="k">うち深夜</div><div class="v">' + hm(m.nightMin) + '</div></div>' +
@@ -472,10 +510,12 @@ function yearView(st) {
     '<span class="badge ' + (m.estimate ? (m.confirmed ? 'b-warn' : 'b-est') : 'b-ok') + '">' + (m.estimate ? (m.confirmed ? '一部見込み' : '見込み') : '確定') + '</span>' +
     '<div class="amt" style="min-width:92px;text-align:right">' + yen(m.confirmed + m.estimate) + '</div></div>').join('') || '<div class="empty">まだ支給予定がありません</div>';
 
-  return ring(p, color, inner) +
+  return (y.excluded > 0 ? ring2({ r: 112, w: 8, ratio: y.progressAll, color: p > 0.95 ? 'var(--red-l)' : p > 0.8 ? '#F2D48A' : 'var(--green-l)' }, { r: 94, w: 16, ratio: p, color }, inner) : ring(p, color, inner)) +
     '<p class="center small muted" style="margin:0">目標 ' + yen(y.target) + ' ' + age + '<br><span class="tiny">支給日の年で数えています（12月分が1月支給なら翌年の収入）</span></p>' +
+    (y.excluded > 0 ? '<div class="under">外側 外した分も入れた額 <b>' + yen(y.judgedAll) + '</b>／内側 外した分を除いた額 <b>' + yen(y.judged) + '</b><br>外した分 <b>' + yen(y.excluded) + '</b>（法律上は判定に入る収入です）</div>' : '') +
+    (y.overWithExcluded > 0 ? '<div class="under" style="margin-top:4px">外した分も入れると、目標を <b>' + yen(y.overWithExcluded) + '</b> 超えています</div>' : '') +
     '<div class="card"><div class="grid2" style="margin-top:0">' +
-    '<div class="stat"><div class="k">判定に使う額</div><div class="v">' + yen(y.judged) + '</div></div>' +
+    '<div class="stat"><div class="k">' + (y.excluded > 0 ? '外した分を除いた額' : '判定に使う額') + '</div><div class="v">' + yen(y.judged) + '</div></div>' +
     '<div class="stat"><div class="k">あと働ける目安</div><div class="v">' + (y.hoursLeft == null ? '-' : '約' + y.hoursLeft.toLocaleString('ja-JP') + '時間') + '</div></div>' +
     '<div class="stat"><div class="k">交通費' + (y.includeTransport ? '（判定に含む）' : '（判定外）') + '</div><div class="v">' + yen(y.transport) + '</div></div>' +
     '<div class="stat"><div class="k">総支給</div><div class="v">' + yen(y.gross) + '</div></div></div>' +
@@ -537,10 +577,10 @@ async function renderInput() {
   const s = S.editShift;
   const today = S.init.today;
   const f = s ? {
-    kind: s.kind, workplaceId: s.workplaceId, date: s.date,
+    excluded: !!s.excluded, kind: s.kind, workplaceId: s.workplaceId, date: s.date,
     start: s.start ? s.start.slice(11) : '', end: s.end ? s.end.slice(11) : '',
     breakMin: s.breaks ? String(breakMinOf(s.breaks)) : (s.shiftId ? '0' : ''), dailyWage: s.dailyWage || '', transport: s.transport || '', memo: s.memo || '', payDate: '',
-  } : { kind: '時間', workplaceId: (wps[0] || {}).workplaceId || '', date: today, start: '', end: '', breakMin: '', dailyWage: '', transport: '', memo: '', payDate: '' };
+  } : { excluded: false, kind: '時間', workplaceId: (wps[0] || {}).workplaceId || '', date: today, start: '', end: '', breakMin: '', dailyWage: '', transport: '', memo: '', payDate: '' };
 
   if (!wps.length && f.kind === '時間') {
     app.innerHTML = '<div class="card"><h2>手入力</h2><p class="small">先に設定画面でバイト先を登録してください。</p><button class="btn btn-primary" onclick="go(\'settings\')">設定を開く</button>' +
@@ -570,6 +610,7 @@ async function renderInput() {
         '<div class="field"><label>支給日<span class="hint">空欄なら勤務日・設定から</span></label><input type="date" id="f-paydate" value="' + esc(f.payDate) + '"></div>'
       : '') +
     '<div class="field"><label>メモ</label><input type="text" id="f-memo" value="' + esc(f.memo) + '" placeholder="未入力" style="text-align:left"></div></div>' +
+    excludeField('f-excl', f.excluded, 'オンにすると、記録は残したまま、この画面の『目標まであと○円』の計算に入れません') +
     '<div class="preview" id="f-prev"><span class="muted small">時刻を入れると給料を計算します</span></div>' +
     '<div class="err" id="f-err"></div>' +
     '<div class="btn-row"><button class="btn btn-primary" id="f-save">' + (s && s.shiftId ? '修正を保存' : '保存する') + '</button></div>' +
@@ -577,11 +618,24 @@ async function renderInput() {
     '</div>';
 
   const val = () => ({
-    shiftId: s && s.shiftId || '', kind: f.kind, workplaceId: $('#f-wp').value, date: $('#f-date').value,
+    excluded: $('#f-excl').checked, shiftId: s && s.shiftId || '', kind: f.kind, workplaceId: $('#f-wp').value, date: $('#f-date').value,
     start: $('#f-start').value, end: $('#f-end').value, breakMin: $('#f-break').value,
     dailyWage: $('#f-wage') ? $('#f-wage').value : '', transport: $('#f-trans') ? $('#f-trans').value : '',
     payDate: $('#f-paydate') ? $('#f-paydate').value : '', memo: $('#f-memo').value,
   });
+
+  const updateExcludeHint = () => excludeHint('f-excl', $('#f-wp').value, s && s.flagUnused);
+  $('#f-wp').addEventListener('change', updateExcludeHint);
+  $('#f-excl').onchange = async e => {
+    const el = e.target, excluded = el.checked;
+    updateExcludeHint();
+    if (!(s && s.shiftId)) return;
+    el.disabled = true;
+    try { await api('setExcluded', { kind: 'shift', id: s.shiftId, excluded }); S.editShift.excluded = excluded; invalidate(); toast('変更しました'); }
+    catch (err) { toast(err.message); el.checked = !excluded; }
+    finally { el.disabled = false; updateExcludeHint(); }
+  };
+  updateExcludeHint();
 
   document.querySelectorAll('#kind button').forEach(b => b.onclick = () => {
     S.editShift = Object.assign({}, s || {}, val(), { kind: b.dataset.k, start: val().start ? val().date + ' ' + val().start : '', end: val().end ? val().date + ' ' + val().end : '', breaks: val().breakMin ? val().breakMin + '分' : '' });
@@ -644,19 +698,19 @@ async function renderEdit() {
   if (!S.status[S.year]) loading();
   const st = await loadStatus(S.year);
   const m = st.months[S.month - 1];
-  const shifts = m.items.reduce((a, i) => a.concat(i.shifts.map(s => Object.assign({ wpName: i.name }, s))), [])
+  const shifts = m.items.reduce((a, i) => a.concat(i.shifts.map(s => Object.assign({ wpName: i.name, excludedByPayslip: !!(i.payslip && i.payslip.excluded) }, s))), [])
     .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
   const slips = m.items.filter(i => i.payslip);
   app.innerHTML =
     '<div class="top"><div class="top-row"><button class="icon-btn" id="prev">‹</button><div class="top-title">' + S.year + '年' + S.month + '月の修正</div><button class="icon-btn" id="next">›</button></div></div>' +
     '<div class="section-title">勤務（' + shifts.length + '件）</div><div class="card" style="margin-top:4px;padding:4px 14px">' +
     (shifts.length ? shifts.map(s =>
-      '<div class="list-row" data-shift="' + esc(s.shiftId) + '"><div class="grow"><b>' + md(s.date) + '（' + wd(s.date) + '）</b> <span class="small muted">' + esc(s.wpName) + '</span>' +
+      '<div class="list-row" data-shift="' + esc(s.shiftId) + '"><div class="grow"><b>' + md(s.date) + '（' + wd(s.date) + '）</b> <span class="small muted">' + esc(s.wpName) + '</span>' + excludedBadge(s) +
       '<div class="tiny muted">' + (s.kind === '単発' ? '単発' : esc(s.start.slice(11)) + '〜' + esc(s.end.slice(11)) + '・' + hm(s.workMin)) + '・' + (s.source === '打刻写真' ? '写真' : '手入力') + '</div></div>' +
       '<div class="amt">' + yen(s.pay) + '</div><span class="chev">›</span></div>').join('') : '<div class="empty">勤務はありません</div>') + '</div>' +
     '<div class="section-title">給与明細</div><div class="card" style="margin-top:4px;padding:4px 14px">' +
     (slips.length ? slips.map(i =>
-      '<div class="list-row" data-slip="' + esc(i.payslip.payslipId) + '"><div class="grow"><b>' + esc(i.name) + '</b> <span class="small muted">' + Number(i.period.slice(5)) + '月分</span>' +
+      '<div class="list-row" data-slip="' + esc(i.payslip.payslipId) + '"><div class="grow"><b>' + esc(i.name) + '</b> <span class="small muted">' + Number(i.period.slice(5)) + '月分</span>' + ((i.payslip.excluded || (S.init.workplaces.find(w => w.workplaceId === i.workplaceId) || {}).excluded) ? ' <span class="badge bdg-out">外した</span>' : '') +
       '<div class="tiny muted">' + md(i.payslip.payDate) + '支給・所得税 ' + yen(i.payslip.incomeTax) + (i.payslip.adjustment ? '・調整額 ' + yen(i.payslip.adjustment) : '') + '</div></div>' +
       '<div class="amt">' + yen(i.payslip.taxable) + '</div><span class="chev">›</span></div>').join('') : '<div class="empty">この月の明細はありません</div>') + '</div>' +
     '<div style="margin:12px"><button class="btn btn-line" id="add-slip">この月の明細を手で入力</button></div>';
@@ -673,7 +727,7 @@ async function renderEdit() {
 }
 
 async function renderPayslipForm() {
-  const p = S.editPayslip || {};
+  const p = S.editPayslip || (S.editPayslip = { excluded: false });
   const wps = S.init.workplaces;
   if (!wps.length) { app.innerHTML = '<div class="card"><p class="small">先に設定画面でバイト先を登録してください。</p><button class="btn btn-primary" onclick="go(\'settings\')">設定を開く</button></div>'; return; }
   app.innerHTML =
@@ -687,15 +741,27 @@ async function renderPayslipForm() {
     '<div class="field"><label>所得税</label><input type="number" inputmode="numeric" id="p-tax" value="' + esc(p.incomeTax || 0) + '"></div>' +
     '<div class="field"><label>調整額<span class="hint">年末調整の戻りはプラス</span></label><input type="number" inputmode="numeric" id="p-adj" value="' + esc(p.adjustment || 0) + '"></div>' +
     '<div class="field"><label>税区分</label><select id="p-col">' + ['', '甲', '乙', '丙'].map(c => '<option' + ((p.taxColumn || '') === c ? ' selected' : '') + ' value="' + c + '">' + (c || 'わからない') + '</option>').join('') + '</select></div>' +
+    excludeField('p-excl', p.excluded, 'オンにすると、この月の明細の金額を、この画面の『目標まであと○円』の計算に入れません') +
     '<div class="err" id="p-err"></div>' +
     '<div class="btn-row"><button class="btn btn-primary" id="p-save">保存する</button></div>' +
     (p.payslipId ? '<button class="btn btn-danger" id="p-del" style="margin-top:6px">この明細を削除</button>' : '') + '</div>' +
     '<p class="disclaimer">明細を登録した月は、勤務からの見込みではなく明細の金額（確定）で集計します。調整額は収入に入りません。</p>';
+  const updateExcludeHint = () => excludeHint('p-excl', $('#p-wp').value, false);
+  $('#p-wp').addEventListener('change', updateExcludeHint);
+  $('#p-excl').onchange = async e => {
+    const el = e.target, excluded = el.checked;
+    if (!p.payslipId) { p.excluded = excluded; return; }
+    el.disabled = true;
+    try { await api('setExcluded', { kind: 'payslip', id: p.payslipId, excluded }); S.editPayslip.excluded = excluded; invalidate(); toast('変更しました'); }
+    catch (err) { toast(err.message); el.checked = !excluded; }
+    finally { el.disabled = false; }
+  };
+  updateExcludeHint();
   $('#p-save').onclick = async () => {
     const btn = $('#p-save'); btn.disabled = true;
     try {
       await api('savePayslip', { payslipId: p.payslipId || '', workplaceId: $('#p-wp').value, target: $('#p-target').value, payDate: $('#p-paydate').value,
-        taxable: $('#p-taxable').value, transport: $('#p-trans').value, incomeTax: $('#p-tax').value, adjustment: $('#p-adj').value, taxColumn: $('#p-col').value });
+        taxable: $('#p-taxable').value, transport: $('#p-trans').value, incomeTax: $('#p-tax').value, adjustment: $('#p-adj').value, taxColumn: $('#p-col').value, excluded: $('#p-excl').checked });
       invalidate(); toast('保存しました');
       const t = $('#p-target').value; S.year = Number(t.slice(0, 4)); S.month = Number(t.slice(5, 7));
       go('edit');
@@ -722,7 +788,7 @@ function renderSettings() {
     '<div class="err" id="s-err"></div><button class="btn btn-primary" id="s-save" style="margin-top:10px">保存する</button></div>' +
     '<div class="section-title">バイト先</div><div class="card" style="margin-top:4px;padding:4px 14px">' +
     (wps.length ? wps.map(w => '<div class="list-row" data-wp="' + esc(w.workplaceId) + '"><div class="grow"><b>' + esc(w.name) + '</b> ' +
-      (w.presetId ? '<span class="badge b-ok">プリセット</span> ' : '') + (w.active ? '' : '<span class="badge b-est">やめた</span>') +
+      (w.excluded ? '<span class="badge bdg-out">外した</span> ' : '') + (w.presetId ? '<span class="badge b-ok">プリセット</span> ' : '') + (w.active ? '' : '<span class="badge b-est">やめた</span>') +
       '<div class="tiny muted">時給 ' + yen(w.baseWage) + '・' + closingText(w) + '</div></div><span class="chev">›</span></div>').join('') : '<div class="empty">まだ登録されていません</div>') + '</div>' +
     '<div style="margin:12px;display:flex;flex-direction:column;gap:8px">' +
     '<button class="btn btn-line" id="s-add">ほかのバイト先を追加</button>' +
@@ -836,7 +902,7 @@ function renderWorkplaceForm() {
     '<div class="field"><label>明細に書かれる会社名<span class="hint">明細の判定に使う</span></label><input type="text" id="w-company" value="' + esc(w.companyName) + '" style="text-align:left"></div>' +
     '<div class="err" id="w-err"></div>' +
     '<div class="btn-row"><button class="btn btn-primary" id="w-save">保存する</button></div></div>' +
-    (w.workplaceId ? '<div class="card"><div class="field"><label>このバイト先をやめた<span class="hint">オンにすると入力の候補に出なくなり、所得税は確定申告の対象として扱います</span></label><label class="switch"><input type="checkbox" id="w-quit"' + (w.active ? '' : ' checked') + '><span></span></label></div></div>' : '');
+    (w.workplaceId ? '<div class="card"><div class="field"><label>このバイト先をやめた<span class="hint">オンにすると入力の候補に出なくなり、所得税は確定申告の対象として扱います</span></label><label class="switch"><input type="checkbox" id="w-quit"' + (w.active ? '' : ' checked') + '><span></span></label></div></div><div class="card">' + excludeField('w-excl', w.excluded, 'オンにすると、このバイト先の勤務・単発・明細をすべて、この画面の『目標まであと○円』の計算に入れません（記録は残ります）') + '</div>' : '');
 
   const read = () => {
     w.name = $('#w-name').value;
@@ -867,6 +933,13 @@ function renderWorkplaceForm() {
       });
       S.init.workplaces = r.workplaces; invalidate(); toast('保存しました'); go('settings');
     } catch (e) { $('#w-err').textContent = e.message; btn.disabled = false; }
+  };
+  if ($('#w-excl')) $('#w-excl').onchange = async e => {
+    const el = e.target, excluded = el.checked;
+    el.disabled = true;
+    try { const r = await api('setWorkplaceExcluded', { workplaceId: w.workplaceId, excluded }); S.init.workplaces = r.workplaces; w.excluded = excluded; invalidate(); toast('変更しました'); }
+    catch (err) { toast(err.message); el.checked = !excluded; }
+    finally { el.disabled = false; }
   };
   if ($('#w-quit')) $('#w-quit').onchange = async e => {
     try { const r = await api('setWorkplaceActive', { workplaceId: w.workplaceId, active: !e.target.checked }); S.init.workplaces = r.workplaces; invalidate(); toast('変更しました'); }
