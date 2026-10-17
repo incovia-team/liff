@@ -126,6 +126,14 @@ table.t tr.total td{font-weight:700;border-bottom:0}
 .under{margin:2px 16px 0;text-align:center;font-size:12.5px;color:var(--sub);line-height:1.7}
 .under b{color:var(--ink)}
 .bdg-out{background:#EEF0F3;color:var(--ink)}
+.slip-time{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px;background:var(--card)}
+.slip-time .ttl{font-size:12px;font-weight:700;color:var(--sub);margin-bottom:2px}
+.slip-time .body{font-size:13px;line-height:1.6}
+.hm-in{display:flex;align-items:center;gap:4px;justify-content:flex-end;font-size:13px;color:var(--sub)}
+.field .hm-in input{width:56px;padding:8px 6px}
+.time-box{background:var(--bg);border-radius:12px;padding:2px 12px 10px;margin-top:4px}
+.time-box .field{border-bottom-color:#E1E4E8}
+.time-box .field input{background:var(--card)}
 </style>
 </head>
 <body>
@@ -458,12 +466,23 @@ function monthView(st) {
   const pending = m.items.some(i => i.transportPending);
   let rows = m.items.map(i =>
     '<tr><td>' + esc(i.name) + (i.payDate ? '<div class="tiny muted">' + md(i.payDate) + '支給' + (i.status === '見込み' ? '予定' : '') + '</div>' : '') + '</td>' +
-    '<td>' + hm(i.workMin) + '</td><td>' + yen(i.estimate) + '</td>' +
+    '<td>' + hm(i.workMin) + (i.workFromSlip ? '<div class="tiny muted">明細</div>' : '') + '</td><td>' + yen(i.estimate) + '</td>' +
     '<td>' + (i.confirmed == null ? '<span class="muted">未着</span>' : yen(i.confirmed)) + '</td></tr>').join('');
   rows += '<tr class="total"><td>合計</td><td>' + hm(m.workMin) + '</td><td>' + yen(m.items.reduce((s, i) => s + i.estimate, 0)) + '</td><td>' +
     (someConfirmed ? yen(m.items.reduce((s, i) => s + (i.confirmed || 0), 0)) : '¥-') + '</td></tr>';
 
   const detail = m.items.map(i => {
+    const t = i.slipTime;
+    const timeParts = t ? [t.days != null ? '出勤 ' + esc(t.days) + '日' : '',
+      t.workMin != null ? '実労働 ' + hm(t.workMin) : '', t.nightMin != null ? 'うち深夜 ' + hm(t.nightMin) : '',
+      t.overtimeMin != null ? '残業 ' + hm(t.overtimeMin) : '', t.holidayMin != null ? '休日 ' + hm(t.holidayMin) : ''].filter(Boolean) : [];
+    const diffText = min => Math.abs(min) < 60 ? Math.abs(min) + '分' : hm(Math.abs(min));
+    const notes = [];
+    if (i.workFromSlip) notes.push('勤務時間は、明細に書かれた時間で数えています');
+    if (i.workDiffMin != null && i.workDiffMin !== 0) notes.push('打刻・手入力の記録では ' + hm(i.shiftWorkMin) + '（明細より' + diffText(i.workDiffMin) + (i.workDiffMin > 0 ? '少ない' : '多い') + '）');
+    if (i.nightDiffMin != null && i.nightDiffMin !== 0) notes.push('うち深夜は ' + hm(i.shiftNightMin) + '（明細より' + diffText(i.nightDiffMin) + (i.nightDiffMin > 0 ? '少ない' : '多い') + '）');
+    const slip = t ? '<div class="slip-time"><div class="ttl">明細の勤務実績</div><div class="body">' + timeParts.join('・') + '</div></div>' +
+      (notes.length ? '<p class="tiny muted" style="margin:6px 0 0">' + notes.join('<br>') + '</p>' : '') : '';
     const b = i.breakdown;
     const bd = i.shifts.some(s => s.kind === '時間')
       ? '<div class="grid2" style="margin-top:6px">' + b.wages.map(w => '<div class="stat"><div class="k">' + esc(w.name) + '</div><div class="v">' + yen(w.yen) + '</div></div>').join('') +
@@ -475,7 +494,7 @@ function monthView(st) {
       (s.kind === '単発' ? '<span class="badge b-est">単発</span>' : '<span class="muted small">' + esc(s.start.slice(11)) + '〜' + esc(s.end.slice(11)) + '</span>') + excludedBadge(Object.assign({ excludedByPayslip: !!(i.payslip && i.payslip.excluded) }, s)) +
       '<div class="tiny muted">' + hm(s.workMin) + (s.nightMin ? '・深夜' + hm(s.nightMin) : '') + (s.source === '打刻写真' ? '・写真' : '・手入力') + (s.memo ? '・' + esc(s.memo) : '') + '</div></div>' +
       '<div class="amt">' + yen(s.pay) + '</div><span class="chev">›</span></div>').join('');
-    return '<div style="margin-top:14px"><b>' + esc(i.name) + '</b> <span class="badge ' + (i.status === '確定' ? 'b-ok' : 'b-est') + '">' + i.status + '</span>' + bd + list + '</div>';
+    return '<div style="margin-top:14px"><b>' + esc(i.name) + '</b> <span class="badge ' + (i.status === '確定' ? 'b-ok' : 'b-est') + '">' + i.status + '</span>' + slip + bd + list + '</div>';
   }).join('');
 
   const center = '<div class="ring-label">' + label + '</div><div class="ring-value">' + yen(m.income) + '</div>';
@@ -485,7 +504,7 @@ function monthView(st) {
     center + '<div class="sub-amt">外した分を除くと<br><b>' + yen(m.income - m.excluded) + '</b></div>') +
     '<div class="under">外した分 <b>' + yen(m.excluded) + '</b>（法律上は判定に入る収入です）</div>' : ring(1, color, center)) +
     '<div class="card" style="margin-top:0"><div class="grid2" style="margin-top:0">' +
-    '<div class="stat"><div class="k">勤務時間</div><div class="v">' + hm(m.workMin) + '</div></div>' +
+    '<div class="stat"><div class="k">' + (m.timeSource === 'all' ? '勤務時間（確定）' : m.timeSource === 'some' ? '勤務時間（一部確定）' : '勤務時間') + '</div><div class="v">' + hm(m.workMin) + '</div></div>' +
     '<div class="stat"><div class="k">うち深夜</div><div class="v">' + hm(m.nightMin) + '</div></div>' +
     '<div class="stat"><div class="k">交通費</div><div class="v">' + (pending && !m.transport ? '<span class="small muted">明細待ち</span>' : yen(m.transport)) + '</div></div>' +
     '<div class="stat"><div class="k">総支給</div><div class="v">' + yen(m.income + m.transport) + '</div></div></div></div>' +
@@ -521,6 +540,10 @@ function yearView(st) {
     '<div class="stat"><div class="k">総支給</div><div class="v">' + yen(y.gross) + '</div></div></div>' +
     '<p class="tiny muted" style="margin:10px 0 0">確定 ' + yen(y.confirmed) + '・見込み ' + yen(y.estimate) +
     (y.hourly ? '・時給の目安 ' + yen(y.hourly) : '') + (y.transportPending ? '<br>明細がまだの月は交通費が入っていません' : '') + '</p></div>' +
+    (y.hasTime ? '<div class="card"><h2>勤務時間</h2><div class="grid2" style="margin-top:0">' +
+    '<div class="stat"><div class="k">今年の勤務時間</div><div class="v">' + hm(y.workMin) + '</div></div>' +
+    '<div class="stat"><div class="k">うち深夜</div><div class="v">' + hm(y.nightMin) + '</div></div></div>' +
+    '<p class="tiny muted" style="margin:10px 0 0">1月〜12月分（働いた月）の合計です。' + (y.workFromSlip ? '<br>明細がある月は、明細に書かれた時間で数えています。' : '') + '</p></div>' : '') +
     '<div class="card"><h2>支給月ごとの収入</h2><div class="bars">' + bars + '</div>' +
     '<div class="bar-labels">' + y.payMonths.map(m => '<span>' + Number(m.ym.slice(5)) + '</span>').join('') + '</div>' +
     '<div class="legend"><span><i style="background:var(--green)"></i>確定</span><span><i style="background:var(--green-l)"></i>見込み</span></div>' +
@@ -711,7 +734,7 @@ async function renderEdit() {
     '<div class="section-title">給与明細</div><div class="card" style="margin-top:4px;padding:4px 14px">' +
     (slips.length ? slips.map(i =>
       '<div class="list-row" data-slip="' + esc(i.payslip.payslipId) + '"><div class="grow"><b>' + esc(i.name) + '</b> <span class="small muted">' + Number(i.period.slice(5)) + '月分</span>' + ((i.payslip.excluded || (S.init.workplaces.find(w => w.workplaceId === i.workplaceId) || {}).excluded) ? ' <span class="badge bdg-out">外した</span>' : '') +
-      '<div class="tiny muted">' + md(i.payslip.payDate) + '支給・所得税 ' + yen(i.payslip.incomeTax) + (i.payslip.adjustment ? '・調整額 ' + yen(i.payslip.adjustment) : '') + '</div></div>' +
+      '<div class="tiny muted">' + md(i.payslip.payDate) + '支給・所得税 ' + yen(i.payslip.incomeTax) + (i.payslip.adjustment ? '・調整額 ' + yen(i.payslip.adjustment) : '') + (i.payslip.time && i.payslip.time.workMin != null ? '・実労働 ' + hm(i.payslip.time.workMin) : '') + '</div></div>' +
       '<div class="amt">' + yen(i.payslip.taxable) + '</div><span class="chev">›</span></div>').join('') : '<div class="empty">この月の明細はありません</div>') + '</div>' +
     '<div style="margin:12px"><button class="btn btn-line" id="add-slip">この月の明細を手で入力</button></div>';
 
@@ -730,6 +753,14 @@ async function renderPayslipForm() {
   const p = S.editPayslip || (S.editPayslip = { excluded: false });
   const wps = S.init.workplaces;
   if (!wps.length) { app.innerHTML = '<div class="card"><p class="small">先に設定画面でバイト先を登録してください。</p><button class="btn btn-primary" onclick="go(\'settings\')">設定を開く</button></div>'; return; }
+  const time = p.time || {};
+  const timeFields = [['work', '実労働時間', 'workMin'], ['night', 'うち深夜', 'nightMin'], ['overtime', '残業', 'overtimeMin'], ['holiday', '休日', 'holidayMin']];
+  const timeOpen = Object.values(time).some(v => v != null);
+  const timeHtml = '<div style="display:flex;flex-direction:column"><button class="text-link" id="p-time-toggle" style="align-self:flex-start">' + (timeOpen ? '− 勤務時間を閉じる' : '＋ 勤務時間を入力（任意）') + '</button></div>' +
+    '<div class="time-box" id="p-time"' + (timeOpen ? '' : ' hidden') + '>' +
+    '<div class="field"><label>出勤日数</label><div class="hm-in"><input type="number" inputmode="decimal" id="p-days" style="width:64px" value="' + esc(time.days == null ? '' : time.days) + '">日</div></div>' +
+    timeFields.map(([id, label, key]) => '<div class="field"><label>' + label + '</label><div class="hm-in"><input type="number" inputmode="numeric" id="p-' + id + '-h" value="' + esc(time[key] == null ? '' : Math.floor(time[key] / 60)) + '">時間<input type="number" inputmode="numeric" id="p-' + id + '-m" value="' + esc(time[key] == null ? '' : pad(time[key] % 60)) + '">分</div></div>').join('') +
+    '<p class="tiny muted" style="margin:8px 0 0">明細に書かれている時間を入れると、月次・年次の勤務時間がこの時間になります。空欄なら、打刻・手入力の記録で数えます。</p></div>';
   app.innerHTML =
     '<div class="top"><div class="top-row"><button class="icon-btn" onclick="go(\'edit\')">‹</button><div class="top-title">給与明細' + (p.payslipId ? 'の修正' : 'の入力') + '</div><div style="width:40px"></div></div></div>' +
     '<div class="card">' +
@@ -742,10 +773,15 @@ async function renderPayslipForm() {
     '<div class="field"><label>調整額<span class="hint">年末調整の戻りはプラス</span></label><input type="number" inputmode="numeric" id="p-adj" value="' + esc(p.adjustment || 0) + '"></div>' +
     '<div class="field"><label>税区分</label><select id="p-col">' + ['', '甲', '乙', '丙'].map(c => '<option' + ((p.taxColumn || '') === c ? ' selected' : '') + ' value="' + c + '">' + (c || 'わからない') + '</option>').join('') + '</select></div>' +
     excludeField('p-excl', p.excluded, 'オンにすると、この月の明細の金額を、この画面の『目標まであと○円』の計算に入れません') +
+    timeHtml +
     '<div class="err" id="p-err"></div>' +
     '<div class="btn-row"><button class="btn btn-primary" id="p-save">保存する</button></div>' +
     (p.payslipId ? '<button class="btn btn-danger" id="p-del" style="margin-top:6px">この明細を削除</button>' : '') + '</div>' +
     '<p class="disclaimer">明細を登録した月は、勤務からの見込みではなく明細の金額（確定）で集計します。調整額は収入に入りません。</p>';
+  $('#p-time-toggle').onclick = () => {
+    const box = $('#p-time'); box.hidden = !box.hidden;
+    $('#p-time-toggle').textContent = box.hidden ? '＋ 勤務時間を入力（任意）' : '− 勤務時間を閉じる';
+  };
   const updateExcludeHint = () => excludeHint('p-excl', $('#p-wp').value, false);
   $('#p-wp').addEventListener('change', updateExcludeHint);
   $('#p-excl').onchange = async e => {
@@ -760,7 +796,16 @@ async function renderPayslipForm() {
   $('#p-save').onclick = async () => {
     const btn = $('#p-save'); btn.disabled = true;
     try {
-      await api('savePayslip', { payslipId: p.payslipId || '', workplaceId: $('#p-wp').value, target: $('#p-target').value, payDate: $('#p-paydate').value,
+      const days = $('#p-days').value;
+      if ($('#p-days').validity?.badInput || (days !== '' && (!Number.isFinite(Number(days)) || Number(days) < 0 || Number(days) > 31))) throw new Error('出勤日数は0〜31で入力してください');
+      const times = { workDays: days === '' ? '' : Number(days) };
+      timeFields.forEach(([id, label, key]) => {
+        const h = $('#p-' + id + '-h'), m = $('#p-' + id + '-m');
+        if (h.validity?.badInput || !Number.isInteger(Number(h.value)) || Number(h.value) < 0 || Number(h.value) > 744) throw new Error('時間は0〜744で入力してください');
+        if (m.validity?.badInput || !Number.isInteger(Number(m.value)) || Number(m.value) < 0 || Number(m.value) > 59) throw new Error('分は0〜59で入力してください');
+        times[key] = h.value === '' && m.value === '' ? '' : Number(h.value) * 60 + Number(m.value);
+      });
+      await api('savePayslip', { ...times, payslipId: p.payslipId || '', workplaceId: $('#p-wp').value, target: $('#p-target').value, payDate: $('#p-paydate').value,
         taxable: $('#p-taxable').value, transport: $('#p-trans').value, incomeTax: $('#p-tax').value, adjustment: $('#p-adj').value, taxColumn: $('#p-col').value, excluded: $('#p-excl').checked });
       invalidate(); toast('保存しました');
       const t = $('#p-target').value; S.year = Number(t.slice(0, 4)); S.month = Number(t.slice(5, 7));
